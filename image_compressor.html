@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Target Size Image Compressor</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f0f2f5;
+            color: #1c1e21;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            max-width: 500px;
+            width: 90%;
+        }
+        h1 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+        p {
+            margin-bottom: 1.5rem;
+            color: #606770;
+        }
+        canvas {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-top: 1.5rem;
+            display: none; /* Initially hidden */
+        }
+        .controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+        #target-size-input {
+            width: 80px;
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .button {
+            background-color: #1877f2;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .button:disabled {
+            background-color: #a0bdf5;
+            cursor: not-allowed;
+        }
+        input[type="file"] {
+            display: none;
+        }
+        #export-btn {
+            display: none; /* Initially hidden */
+        }
+        #result-info {
+            margin-top: 1.5rem;
+            padding: 1rem;
+            background-color: #f7f8fa;
+            border: 1px solid #e4e6eb;
+            border-radius: 6px;
+            display: none;
+            text-align: left;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>智能图片压缩</h1>
+        <p>上传图片，设定目标大小，工具会自动寻找最佳质量和尺寸。</p>
+
+        <div class="controls">
+            <label for="target-size-input">目标大小:</label>
+            <input type="number" id="target-size-input" value="50">
+            <span>KB</span>
+        </div>
+
+        <div>
+            <button id="upload-btn" class="button">选择图片</button>
+            <input type="file" id="file-input" accept="image/*">
+            <button id="export-btn" class="button">压缩并导出</button>
+        </div>
+
+        <div id="result-info"></div>
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('file-input');
+        const uploadBtn = document.getElementById('upload-btn');
+        const exportBtn = document.getElementById('export-btn');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const targetSizeInput = document.getElementById('target-size-input');
+        const resultInfo = document.getElementById('result-info');
+
+        let originalImage = new Image();
+        let originalFileName = 'image';
+
+        uploadBtn.addEventListener('click', () => fileInput.click());
+
+        fileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            originalFileName = file.name.split('.').slice(0, -1).join('.');
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                originalImage.onload = () => {
+                    // Set actual canvas resolution for processing
+                    canvas.width = originalImage.width;
+                    canvas.height = originalImage.height;
+                    ctx.drawImage(originalImage, 0, 0);
+
+                    // Style the canvas for a non-distorted, contained preview
+                    const previewContainerWidth = canvas.parentElement.clientWidth;
+                    const maxPreviewHeight = 400; // Max height for the preview box
+                    const imageAspectRatio = originalImage.width / originalImage.height;
+
+                    let previewWidth = originalImage.width;
+                    let previewHeight = originalImage.height;
+
+                    // Does it need to be scaled down by width?
+                    if (previewWidth > previewContainerWidth) {
+                        previewWidth = previewContainerWidth;
+                        previewHeight = previewWidth / imageAspectRatio;
+                    }
+
+                    // Does it still need to be scaled down by height?
+                    if (previewHeight > maxPreviewHeight) {
+                        previewHeight = maxPreviewHeight;
+                        previewWidth = previewHeight * imageAspectRatio;
+                    }
+
+                    canvas.style.width = previewWidth + 'px';
+                    canvas.style.height = previewHeight + 'px';
+
+                    canvas.style.display = 'block';
+                    exportBtn.style.display = 'inline-block';
+                    resultInfo.style.display = 'none';
+                };
+                originalImage.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        // Helper function to get a blob from a canvas with a specific quality
+        function getCanvasBlob(canvas, quality) {
+            return new Promise((resolve) => {
+                canvas.toBlob(blob => resolve(blob), 'image/jpeg', quality);
+            });
+        }
+
+        exportBtn.addEventListener('click', async () => {
+            exportBtn.disabled = true;
+            exportBtn.textContent = '压缩中...';
+            resultInfo.style.display = 'none';
+
+            const targetSizeKB = parseFloat(targetSizeInput.value);
+            const targetSizeBytes = targetSizeKB * 1024;
+
+            let currentScale = 1.0;
+            let finalBlob = null;
+            let finalQuality = 0;
+            let finalWidth = 0;
+            let finalHeight = 0;
+
+            // Create a temporary canvas for processing
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+
+            // Loop to reduce dimensions if necessary
+            while (currentScale > 0.1) {
+                const scaledWidth = Math.round(originalImage.width * currentScale);
+                const scaledHeight = Math.round(originalImage.height * currentScale);
+                tempCanvas.width = scaledWidth;
+                tempCanvas.height = scaledHeight;
+                tempCtx.drawImage(originalImage, 0, 0, scaledWidth, scaledHeight);
+
+                // First, check if the image is already small enough at max quality
+                let testBlob = await getCanvasBlob(tempCanvas, 1.0);
+                if (testBlob.size <= targetSizeBytes) {
+                    finalBlob = testBlob;
+                    finalQuality = 1.0;
+                    break; // Found a good enough version, exit dimension loop
+                }
+
+                // Binary search for the best quality at the current scale
+                let minQuality = 0, maxQuality = 1, bestQuality = 0;
+                for (let i = 0; i < 7; i++) { // 7 iterations are enough for good precision
+                    let quality = (minQuality + maxQuality) / 2;
+                    let blob = await getCanvasBlob(tempCanvas, quality);
+                    if (blob.size <= targetSizeBytes) {
+                        bestQuality = quality;
+                        finalBlob = blob; // This is a potential candidate
+                        minQuality = quality; // Try for higher quality
+                    } else {
+                        maxQuality = quality; // Too large, reduce quality
+                    }
+                }
+
+                if (finalBlob) {
+                    finalQuality = bestQuality;
+                    break; // Found a solution, exit dimension loop
+                }
+
+                // If no solution found, reduce scale and try again
+                currentScale -= 0.1;
+            }
+
+            if (finalBlob) {
+                finalWidth = tempCanvas.width;
+                finalHeight = tempCanvas.height;
+
+                // Download the result
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(finalBlob);
+                link.download = `${originalFileName}-compressed-${targetSizeKB}kb.jpg`;
+                link.click();
+
+                // Show results
+                resultInfo.style.display = 'block';
+                resultInfo.innerHTML = 
+                    `<strong>压缩成功!</strong><br>` +
+                    `最终大小: <strong>${(finalBlob.size / 1024).toFixed(2)} KB</strong><br>` +
+                    `自动质量: <strong>${(finalQuality * 100).toFixed(0)}%</strong><br>` +
+                    `最终尺寸: <strong>${finalWidth} x ${finalHeight}px</strong>`;
+            } else {
+                resultInfo.style.display = 'block';
+                resultInfo.innerHTML = '<strong>压缩失败:</strong> 无法在合理范围内将图片压缩到目标大小。';
+            }
+
+            exportBtn.disabled = false;
+            exportBtn.textContent = '压缩并导出';
+        });
+    </script>
+
+</body>
+</html>
